@@ -1,0 +1,13 @@
+{
+  "name": "qalavision-weather-billboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Weather widgets for LED billboard display",
+  "scripts": {
+    "start": "serve -l 8000 .",
+    "dev": "serve -l 8000 ."
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}
