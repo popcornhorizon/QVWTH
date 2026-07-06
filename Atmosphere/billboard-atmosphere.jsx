@@ -407,7 +407,9 @@ function TodayArc({ p, isDay, accent, active }) {
   useEffect(() => {
     const cnv = ref.current; if (!cnv) return;
     const ctx = cnv.getContext("2d");
-    let raf, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // dpr clamped low: the stage is already wall-native (2834 px) and the
+    // TB50's HDMI out caps at 1920 wide, so a >1 buffer is wasted work/memory.
+    let raf, dpr = Math.min(1.25, window.devicePixelRatio || 1);
     function size() {
       const w = cnv.offsetWidth, h = cnv.offsetHeight;
       cnv.width = w * dpr; cnv.height = h * dpr;
@@ -458,7 +460,9 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
   }
 
   const accent = isDay ? "#ffce6e" : "#bcd2ff";
-  const W = 1920, H = 1080;
+  // Stage dims come from the mount (native LED-wall size); the overlay math
+  // must match the canvas, which draws at the real stage size.
+  const W = window.STAGE_W || 1920, H = window.STAGE_H || 1080;
   const [bx, by] = _arcPos(p, W, H);
   const { x0, x1, horizonY } = _arcGeom(W, H);
 
@@ -483,7 +487,7 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
       <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
         {/* section header */}
         <div className="absolute flex items-baseline justify-between"
-          style={{ left: 96, right: 96, top: 168 }}>
+          style={{ left: 96, right: 96, top: H * 0.156 }}>
           <span style={{ fontSize: 24, letterSpacing: "0.2em", fontWeight: 600 }}>
             <RotatingLabel k="daysky" className="text-white/65" offset={0} />
           </span>
@@ -494,7 +498,7 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
 
         {/* current temperature living in the bowl of the arc */}
         <div className="absolute text-center today-rise"
-          style={{ left: "50%", top: 392, transform: "translateX(-50%)", animationDelay: "260ms" }}>
+          style={{ left: "50%", top: H * 0.363, transform: "translateX(-50%)", animationDelay: "260ms" }}>
           <div style={{ fontSize: 168, fontWeight: 200, lineHeight: 0.9, letterSpacing: "-0.04em" }}>
             {round(cur.temperature_2m)}°
           </div>
