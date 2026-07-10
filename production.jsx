@@ -1,17 +1,15 @@
 // production.jsx — billboard entry point (no design canvas, no tweaks).
 // Mounts the Atmosphere variant full-screen, live weather only, scaled from
-// its fixed 1920×1080 design canvas to fit whatever screen it's shown on
-// (uniform scale-to-fit, letterboxed rather than cropped or stretched).
+// its design canvas to fit whatever screen it's shown on (uniform scale-to-fit,
+// letterboxed rather than cropped or stretched).
 //
-// NOTE: the wall's native canvas (2834×1167, ~2.43:1) is wider-and-shorter
-// than this 16:9 design, so scale-to-fit will letterbox left/right on that
-// exact screen. A native 2834×1167 re-layout (recomposing the hero/stat/arc
-// views for that aspect ratio) is a separate follow-up — see the handoff doc
-// §4/§7. This page is safe to test on the TB50 today as-is.
+// The canvas matches the Aktau wall's real pixel grid as registered in VNNOX
+// (screen "Weather Billboard", 1920×1152), so on the TB50 the scale lands on
+// exactly 1 and the stage maps 1:1 to the LEDs with no resampling and no bars.
 const { createRoot } = ReactDOM;
 
 const DESIGN_W = 1920;
-const DESIGN_H = 1080;
+const DESIGN_H = 1152;
 
 function useFitScale(designW, designH) {
   const [scale, setScale] = React.useState(1);

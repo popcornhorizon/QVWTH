@@ -280,7 +280,7 @@ const _rgbaA  = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const _clampA = (v, a, b) => (v < a ? a : v > b ? b : v);
 const _easeA  = (t) => 1 - Math.pow(1 - t, 3);
 
-// Shared arc geometry (canvas px ≈ 1920×1080 view box)
+// Shared arc geometry — resolution-independent, expressed as fractions of the stage
 function _arcGeom(W, H) {
   const x0 = W * 0.155, x1 = W * 0.845;
   const horizonY = H * 0.685;
@@ -290,6 +290,21 @@ function _arcGeom(W, H) {
 function _arcPos(p, W, H) {
   const { x0, x1, horizonY, arcH } = _arcGeom(W, H);
   return [x0 + (x1 - x0) * p, horizonY - arcH * Math.sin(Math.PI * p)];
+}
+
+// Keeps the DOM overlay locked to the same stage box the canvas draws into,
+// so the arc markers stay on the arc at any stage size.
+function useStageSize(ref) {
+  const [size, setSize] = useState({ W: 1920, H: 1152 });
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const measure = () => setSize({ W: el.offsetWidth, H: el.offsetHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return size;
 }
 
 function drawTodayArc(ctx, W, H, p, isDay, accentHex, ms, introT) {
@@ -430,6 +445,7 @@ function TodayArc({ p, isDay, accent, active }) {
 }
 
 function ViewToday({ data, now, heroLang, w, bg, active }) {
+  const stageRef = useRef(null);
   const cur = data.current;
   const daily = data.daily;
   const isDay = !!cur.is_day;
@@ -458,7 +474,7 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
   }
 
   const accent = isDay ? "#ffce6e" : "#bcd2ff";
-  const W = 1920, H = 1080;
+  const { W, H } = useStageSize(stageRef);
   const [bx, by] = _arcPos(p, W, H);
   const { x0, x1, horizonY } = _arcGeom(W, H);
 
@@ -475,7 +491,7 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
   ];
 
   return (
-    <div className="absolute inset-0" style={{ overflow: "hidden" }}>
+    <div ref={stageRef} className="absolute inset-0" style={{ overflow: "hidden" }}>
       <TodayArc p={p} isDay={isDay} accent={accent} active={active} />
 
       {/* OVERLAYS — non-interactive, crisp text on top of the canvas glow */}
