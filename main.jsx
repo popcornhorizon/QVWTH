@@ -15,7 +15,7 @@ function App() {
     <React.Fragment>
       <DesignCanvas
         title="Qalavision · Billboard Weather"
-        subtitle="Aktau · 2 directions · 1920×1080 (renders 1:1 to your 2834×1167 LED at 1.475×)"
+        subtitle="Aktau · 2 directions · renders 1:1 to the 1920×1152 LED wall"
       >
         <DCSection id="variants" title="Directions">
           <DCArtboard id="atmosphere" label="01 · Atmosphere — cinematic living sky" width={1920} height={1080}>

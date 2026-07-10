@@ -1,5 +1,5 @@
 // Shared data hook, lookups, helpers, logo, label rotator
-const { useState, useEffect, useRef, useMemo } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useMemo } = React;
 
 // ---------- Open-Meteo ----------
 const LAT = 43.65;
