@@ -698,7 +698,7 @@ function VariantAtmosphere({ flythrough = false, flySpeed = 1, previewWeather = 
 
         {/* RIGHT — live status + clock */}
         <div className="flex items-center justify-end gap-6">
-          <LivePill offset={2} />
+          <LivePill offset={2} fetchedAt={data._fetchedAt} />
           <span style={{ fontSize: 34, letterSpacing: "0.04em", fontWeight: 500 }} className="text-white/95 tabular-nums">
             {fmtClock(now)}
           </span>
@@ -738,7 +738,15 @@ function VariantAtmosphere({ flythrough = false, flySpeed = 1, previewWeather = 
 }
 
 // Confident broadcast-style LIVE indicator (a refined pill, not a dev dot).
-function LivePill({ offset = 2 }) {
+// A screen nobody is watching must not claim to be live while showing hours-old
+// numbers. Past STALE_AFTER_MS the pill goes amber, stops pulsing, and reports
+// the time of the last successful fetch instead of the word "live".
+const STALE_AFTER_MS = 20 * 60 * 1000;
+
+function LivePill({ offset = 2, fetchedAt }) {
+  const stale = !fetchedAt || Date.now() - fetchedAt > STALE_AFTER_MS;
+  const tint = stale ? "#f5a623" : "#ff5e5e";
+  const at = fetchedAt ? new Date(fetchedAt) : null;
   return (
     <span
       className="flex items-center"
@@ -751,16 +759,24 @@ function LivePill({ offset = 2 }) {
       }}
     >
       <span className="relative inline-flex" style={{ width: 11, height: 11 }}>
-        <span
-          className="absolute inset-0 rounded-full"
-          style={{ background: "#ff5e5e", animation: "liveRing 1.8s ease-out infinite" }}
-        />
+        {!stale && (
+          <span
+            className="absolute inset-0 rounded-full"
+            style={{ background: tint, animation: "liveRing 1.8s ease-out infinite" }}
+          />
+        )}
         <span
           className="relative inline-block rounded-full"
-          style={{ width: 11, height: 11, background: "#ff5e5e", boxShadow: "0 0 12px #ff5e5e" }}
+          style={{ width: 11, height: 11, background: tint, boxShadow: `0 0 12px ${tint}` }}
         />
       </span>
-      <RotatingLabel k="live" className="text-white/85" offset={offset} />
+      {stale ? (
+        <span className="text-white/85 tabular-nums">
+          {at ? `${pad2(at.getHours())}:${pad2(at.getMinutes())}` : "—:—"}
+        </span>
+      ) : (
+        <RotatingLabel k="live" className="text-white/85" offset={offset} />
+      )}
     </span>
   );
 }

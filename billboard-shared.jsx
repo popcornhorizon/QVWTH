@@ -8,8 +8,20 @@ const FORECAST_URL = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&lon
 const AQ_URL = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${LAT}&longitude=${LON}&current=european_aqi,pm10,pm2_5&timezone=auto`;
 const MARINE_URL = `https://marine-api.open-meteo.com/v1/marine?latitude=${LAT}&longitude=${LON}&current=wave_height,wave_direction,wave_period,sea_surface_temperature&timezone=auto`;
 
+// Last good payload survives reloads and outages: an unattended screen must
+// never go blank just because one fetch failed.
+const CACHE_KEY = "qv_weather_last_good";
+function readCachedWeather() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function useWeather() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(readCachedWeather);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -22,8 +34,10 @@ function useWeather() {
           fetch(MARINE_URL).then((r) => r.json()).catch(() => null),
         ]);
         if (cancelled) return;
-        setData({ ...w, air: a, marine: m, _fetchedAt: Date.now() });
+        const payload = { ...w, air: a, marine: m, _fetchedAt: Date.now() };
+        setData(payload);
         setError(null);
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); } catch (e) {}
       } catch (e) {
         if (!cancelled) setError(e.message || "Network error");
       }
