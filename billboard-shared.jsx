@@ -8,12 +8,29 @@ const FORECAST_URL = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&lon
 const AQ_URL = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${LAT}&longitude=${LON}&current=european_aqi,pm10,pm2_5&timezone=auto`;
 const MARINE_URL = `https://marine-api.open-meteo.com/v1/marine?latitude=${LAT}&longitude=${LON}&current=wave_height,wave_direction,wave_period,sea_surface_temperature&timezone=auto`;
 
+const WEATHER_CACHE_KEY = "qalavision_weather_cache_v1";
+
 function useWeather() {
-  const [data, setData] = useState(null);
+  // Hydrate instantly from the last successful fetch so a fresh page load
+  // (the LED player reloads this page on every solution loop) never shows
+  // a blank/black frame while waiting on the network - it shows the last
+  // known-good data immediately, then updates once the new fetch resolves.
+  const [data, setData] = useState(() => {
+    try {
+      const cached = localStorage.getItem(WEATHER_CACHE_KEY);
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer = null;
+    let retryDelay = 15 * 1000; // start fast: 15s, back off up to 2 min
+    const REFRESH_MS = 10 * 60 * 1000;
+
     async function load() {
       try {
         const [w, a, m] = await Promise.all([
@@ -22,17 +39,32 @@ function useWeather() {
           fetch(MARINE_URL).then((r) => r.json()).catch(() => null),
         ]);
         if (cancelled) return;
-        setData({ ...w, air: a, marine: m, _fetchedAt: Date.now() });
+        const fresh = { ...w, air: a, marine: m, _fetchedAt: Date.now() };
+        setData(fresh);
         setError(null);
+        retryDelay = 15 * 1000; // reset backoff after a success
+        try {
+          localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(fresh));
+        } catch {
+          // storage unavailable/full - non-fatal, just skip caching
+        }
       } catch (e) {
-        if (!cancelled) setError(e.message || "Network error");
+        if (cancelled) return;
+        setError(e.message || "Network error");
+        // Retry quickly instead of sitting dark for the full 10-minute cycle -
+        // a transient DNS/network blip should self-heal within seconds, not
+        // leave the screen on the error frame for 10 minutes.
+        retryTimer = setTimeout(load, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 2 * 60 * 1000);
       }
     }
+
     load();
-    const id = setInterval(load, 10 * 60 * 1000);
+    const id = setInterval(load, REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, []);
 
@@ -65,8 +97,8 @@ const WMO = {
   51: { en: "Light drizzle",    ru: "Лёгкая морось",       kz: "Жеңіл жаңбыр",    scene: "rain" },
   53: { en: "Drizzle",          ru: "Морось",              kz: "Жаңбыр себелейді",scene: "rain" },
   55: { en: "Heavy drizzle",    ru: "Сильная морось",      kz: "Қатты жаңбыр",    scene: "rain" },
-  56: { en: "Freezing drizzle", ru: "Ледяная морось",       kz: "Мұзды себелек",   scene: "sleet" },
-  57: { en: "Freezing drizzle", ru: "Ледяная морось",       kz: "Мұзды себелек",   scene: "sleet" },
+  56: { en: "Freezing drizzle", ru: "Ледяная морось",      kz: "Мұзды себелек",   scene: "sleet" },
+  57: { en: "Freezing drizzle", ru: "Ледяная морось",      kz: "Мұзды себелек",   scene: "sleet" },
   61: { en: "Light rain",       ru: "Лёгкий дождь",        kz: "Жеңіл жаңбыр",    scene: "rain" },
   63: { en: "Rain",             ru: "Дождь",               kz: "Жаңбыр",          scene: "rain" },
   65: { en: "Heavy rain",       ru: "Сильный дождь",       kz: "Нөсер",           scene: "rain" },
@@ -102,20 +134,20 @@ const T = {
   pressure:   { en: "PRESSURE",       ru: "ДАВЛЕНИЕ",       kz: "ҚЫСЫМ" },
   today:      { en: "TODAY",          ru: "СЕГОДНЯ",        kz: "БҮГІН" },
   live:       { en: "LIVE",           ru: "В ЭФИРЕ",        kz: "ЭФИРДЕ" },
-  forecast10: { en: "10-DAY FORECAST", ru: "ПРОГНОЗ НА 10 ДНЕЙ", kz: "10 КҮНДІК БОЛЖАМ" },
-  hourly:     { en: "NEXT 12 HOURS",   ru: "БЛИЖАЙШИЕ 12 ЧАСОВ", kz: "КЕЛЕСІ 12 САҐАТ" },
-  caspian:    { en: "CASPIAN SEA",     ru: "КАСПИЙ",      kz: "КАСПИЙ" },
-  water:      { en: "WATER",           ru: "ВОДА",         kz: "СУ" },
-  waves:      { en: "WAVES",           ru: "ВОЛНЫ",       kz: "ТОЛҚЫН" },
-  sunsetIn:   { en: "SUNSET IN",       ru: "ДО ЗАКАТА",   kz: "КҮН БАТУҐА" },
-  sunriseIn:  { en: "SUNRISE IN",      ru: "ДО ВОСХОДА",  kz: "КҮН ШЫғУҐА" },
-  goldenHour: { en: "GOLDEN HOUR",     ru: "ЗОЛОТОЙ ЧАС",  kz: "АЛТЫН САҐАТ" },
-  updated:    { en: "UPDATED",         ru: "ОБНОВЛЕНО",   kz: "ЖАНАРТЫЛДЫ" },
-  exposure:   { en: "EXPOSURE",        ru: "ВОЗДЕЙСТВИЕ",  kz: "ӘСЕР" },
-  comfort:    { en: "COMFORT",         ru: "КОМФОРТ",      kz: "ЮЙАЛЫҚ" },
-  daylight:   { en: "DAYLIGHT",        ru: "СВЕТОВОЙ ДЕНЬ", kz: "ЖАРЫҚ КҮН" },
-  daysky:     { en: "TODAY · SKY",     ru: "СЕГОДНЯ · НЕБО", kz: "БҮГІН · АСПАН" },
-  nowLbl:     { en: "NOW",             ru: "СЕЙЧАС",       kz: "ҚАЗІР" },
+  forecast10: { en: "10-DAY FORECAST",ru: "ПРОГНОЗ НА 10 ДНЕЙ",kz: "10 КҮНДІК БОЛЖАМ" },
+  hourly:     { en: "NEXT 12 HOURS",  ru: "БЛИЖАЙШИЕ 12 ЧАСОВ",kz: "КЕЛЕСІ 12 САҐАТ" },
+  caspian:    { en: "CASPIAN SEA",    ru: "КАСПИЙ",         kz: "КАСПИЙ" },
+  water:      { en: "WATER",          ru: "ВОДА",           kz: "СУ" },
+  waves:      { en: "WAVES",          ru: "ВОЛНЫ",          kz: "ТОЛҚЫН" },
+  sunsetIn:   { en: "SUNSET IN",      ru: "ДО ЗАКАТА",      kz: "КҮН БАТУҐА" },
+  sunriseIn:  { en: "SUNRISE IN",     ru: "ДО ВОСХОДА",     kz: "КҮН ШЫғУҐА" },
+  goldenHour: { en: "GOLDEN HOUR",    ru: "ЗОЛОТОЙ ЧАС",    kz: "АЛТЫН САҐАТ" },
+  updated:    { en: "UPDATED",        ru: "ОБНОВЛЕНО",      kz: "ЖАНАРТЫЛДЫ" },
+  exposure:   { en: "EXPOSURE",       ru: "ВОЗДЕЙСТВИЕ",    kz: "ӘСЕР" },
+  comfort:    { en: "COMFORT",        ru: "КОМФОРТ",        kz: "ЮЙАЛЫҚ" },
+  daylight:   { en: "DAYLIGHT",       ru: "СВЕТОВОЙ ДЕНЬ",  kz: "ЖАРЫҚ КҮН" },
+  daysky:     { en: "TODAY · SKY",    ru: "СЕГОДНЯ · НЕБО", kz: "БҮГІН · АСПАН" },
+  nowLbl:     { en: "NOW",            ru: "СЕЙЧАС",         kz: "ҚАЗІР" },
 };
 
 // Trilingual short day names. Index 0..6 = Sun..Sat (matches Date#getDay).
@@ -272,8 +304,8 @@ function ParticleScene({ scene = "clear", isDay = true, intensity = 1, windDir =
     // Wind → horizontal drift. windDir is the meteorological FROM-direction;
     // particles travel toward (dir+180). Screen +x = east (90°).
     const moveRad = ((windDir + 180) % 360) * Math.PI / 180;
-    const windX = Math.sin(moveRad);                       // -1..1
-    const windMag = Math.min(1.4, (windSpeed || 0) / 32);  // 0..~1.4
+    const windX = Math.sin(moveRad); // -1..1
+    const windMag = Math.min(1.4, (windSpeed || 0) / 32); // 0..~1.4
 
     function reset() {
       ps = [];
@@ -382,8 +414,8 @@ function ParticleScene({ scene = "clear", isDay = true, intensity = 1, windDir =
 function QalavisionMark({ className = "", small = false, size }) {
   const sz = size || (small ? "sm" : "md");
   const cfg = sz === "lg" ? { svg: 54, gap: 16, brand: 26, tag: 13 }
-           : sz === "sm" ? { svg: 28, gap: 10, brand: 14, tag: 8 }
-           :                { svg: 36, gap: 12, brand: 18, tag: 10 };
+            : sz === "sm" ? { svg: 28, gap: 10, brand: 14, tag: 8 }
+            : { svg: 36, gap: 12, brand: 18, tag: 10 };
   return (
     <div className={`flex items-center ${className}`} style={{ gap: cfg.gap }}>
       <svg width={cfg.svg} height={cfg.svg} viewBox="0 0 40 40" fill="none">
@@ -404,10 +436,10 @@ function QalavisionMark({ className = "", small = false, size }) {
 function backgroundFor(scene, isDay) {
   // Two-stop deep gradient + accent overlay
   if (scene === "thunder")            return { a: "#0b0b18", b: "#311b3f", c: "#0a0a14", glow: "#7a4cff" };
-  if (scene === "sleet")               return { a: "#1b2735", b: "#3d556b", c: "#0a131d", glow: "#bcd2e6" };
-  if (scene === "dust")                return { a: "#5a4326", b: "#a07a44", c: "#241a0e", glow: "#e0b070" };
+  if (scene === "sleet")              return { a: "#1b2735", b: "#3d556b", c: "#0a131d", glow: "#bcd2e6" };
+  if (scene === "dust")               return { a: "#5a4326", b: "#a07a44", c: "#241a0e", glow: "#e0b070" };
   if (scene === "wind")                return isDay ? { a: "#2a567f", b: "#7aa8cf", c: "#122636", glow: "#d6e6f2" }
-                                                     : { a: "#0b1422", b: "#22344a", c: "#05080f", glow: "#7d96b4" };
+                                                       : { a: "#0b1422", b: "#22344a", c: "#05080f", glow: "#7d96b4" };
   if (scene === "heat")                return { a: "#3f74a8", b: "#e9c98a", c: "#7a5a30", glow: "#ffdd99" };
   if (scene === "rain")                return { a: "#0d2233", b: "#1d3b54", c: "#070d18", glow: "#3a86ff" };
   if (scene === "snow")                return { a: "#1a2a3d", b: "#456a8a", c: "#0a141f", glow: "#a8d8ff" };
@@ -422,11 +454,11 @@ function backgroundFor(scene, isDay) {
 // Beaufort scale for wave height: comfort/danger label
 function waveScale(h) {
   if (h == null) return { label: "—", color: "#888" };
-  if (h < 0.3)  return { label: { en: "CALM",   ru: "ШТИЛЬ",   kz: "ТЫНЫШ"   }, color: "#5ec27a" };
-  if (h < 0.8)  return { label: { en: "LIGHT",  ru: "ЛЁГКО",   kz: "ЖЕҢІЛ"   }, color: "#aac95a" };
-  if (h < 1.5)  return { label: { en: "MODERATE",ru: "СРЕДНИЕ",kz: "ОРТАША"  }, color: "#f0c243" };
-  if (h < 2.5)  return { label: { en: "ROUGH",  ru: "СИЛЬНО",  kz: "ҚАТТЫ"   }, color: "#f08c43" };
-  return                { label: { en: "VERY ROUGH",ru:"ШТОРМ",  kz:"ДАУЫЛ"     }, color: "#e15252" };
+  if (h < 0.3) return { label: { en: "CALM", ru: "ШТИЛЬ", kz: "ТЫНЫШ" }, color: "#5ec27a" };
+  if (h < 0.8) return { label: { en: "LIGHT", ru: "ЛЁГКО", kz: "ЖЕҢІЛ" }, color: "#aac95a" };
+  if (h < 1.5) return { label: { en: "MODERATE",ru: "СРЕДНИЕ",kz: "ОРТАША" }, color: "#f0c243" };
+  if (h < 2.5) return { label: { en: "ROUGH", ru: "СИЛЬНО", kz: "ҚАТТЫ" }, color: "#f08c43" };
+  return                { label: { en: "VERY ROUGH",ru:"ШТОРМ", kz:"ДАУЫЛ" }, color: "#e15252" };
 }
 
 // Time-until helper. Returns { h, m, totalMin, label } for distance from `now` to `targetISO`.
