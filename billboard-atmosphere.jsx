@@ -422,18 +422,26 @@ function TodayArc({ p, isDay, accent, active }) {
   useEffect(() => {
     const cnv = ref.current; if (!cnv) return;
     const ctx = cnv.getContext("2d");
-    let raf, dpr = Math.min(2, window.devicePixelRatio || 1);
+    // The stage is authored at the wall's native 1920x1152 and maps 1:1 to the
+    // LEDs, so a buffer above 1 device pixel per CSS pixel is resampled straight
+    // back down — cost with no visible gain on the player.
+    let raf, dpr = Math.min(window.QV_DPR_CAP || 1, window.devicePixelRatio || 1);
     function size() {
       const w = cnv.offsetWidth, h = cnv.offsetHeight;
       cnv.width = w * dpr; cnv.height = h * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     size();
+    const ARC_FRAME_MS = 1000 / (window.QV_FPS || 30);
+    let lastDraw = -1e9;
     function frame() {
+      // Scheduled first so an early return can never break the chain.
+      raf = requestAnimationFrame(frame);
       const ms = performance.now();
+      if (ms - lastDraw < ARC_FRAME_MS - 1) return;   // throttle to QV_FPS
+      lastDraw = ms;
       const introT = _easeA(_clampA((ms - startRef.current) / 1300, 0, 1));
       drawTodayArc(ctx, cnv.offsetWidth, cnv.offsetHeight, pRef.current, dayRef.current, accRef.current, ms, introT);
-      raf = requestAnimationFrame(frame);
     }
     frame();
     const onR = () => size();
