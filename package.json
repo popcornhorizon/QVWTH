@@ -5,9 +5,13 @@
   "description": "Weather widgets for LED billboard display",
   "scripts": {
     "start": "serve -l 8000 .",
-    "dev": "serve -l 8000 ."
+    "dev": "serve -l 8000 .",
+    "build:hardened": "node scripts/build-hardened.js",
+    "verify:hardened": "node scripts/build-hardened.js --check"
   },
   "devDependencies": {
-    "serve": "^14.2.4"
+    "@babel/standalone": "^8.0.3",
+    "serve": "^14.2.4",
+    "tailwindcss": "^3.4.19"
   }
 }

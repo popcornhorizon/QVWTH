@@ -176,6 +176,13 @@ function buildClouds() {
   return layers;
 }
 
+// Frame cap and pixel-density cap for the sky canvas. The TB50 gains nothing
+// from 60fps on a scene that changes over minutes, and nothing from rendering
+// above 1 device pixel per CSS pixel — both just burn fill rate the player does
+// not have. Override with window.QV_FPS / window.QV_DPR_CAP before this loads.
+const SKY_FPS = window.QV_FPS || 30;
+const SKY_DPR_CAP = window.QV_DPR_CAP || 1;
+
 function LivingSky({
   scene = "clear", isDay = true, sunProgress = 0.5,
   sunriseISO, sunsetISO, now, tempC = 20,
@@ -195,12 +202,28 @@ function LivingSky({
     const cnv = ref.current; if (!cnv) return;
     const ctx = cnv.getContext("2d");
     let raf, W = 0, H = 0, dpr = 1;
+    // Baked once per resize rather than rebuilt every frame (see draw()).
+    let scrimL = null, scrimB = null, scrimT = null;
+    let glitterSprite = null, glitterKey = "";
 
     function resize() {
-      dpr = Math.min(1.6, window.devicePixelRatio || 1);
+      dpr = Math.min(SKY_DPR_CAP, window.devicePixelRatio || 1);
       W = cnv.offsetWidth; H = cnv.offsetHeight;
       cnv.width = W * dpr; cnv.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // The readability scrims are fixed geometry in fixed colours — they only
+      // depend on W/H, so there is no reason to re-create them 30 times a second.
+      scrimL = ctx.createLinearGradient(0, 0, W * 0.62, 0);
+      scrimL.addColorStop(0, "rgba(0,0,0,0.34)");
+      scrimL.addColorStop(1, "rgba(0,0,0,0)");
+      scrimB = ctx.createLinearGradient(0, H * 0.62, 0, H);
+      scrimB.addColorStop(0, "rgba(0,0,0,0)");
+      scrimB.addColorStop(1, "rgba(0,0,0,0.4)");
+      scrimT = ctx.createLinearGradient(0, 0, 0, 150);
+      scrimT.addColorStop(0, "rgba(0,0,0,0.28)");
+      scrimT.addColorStop(1, "rgba(0,0,0,0)");
+      glitterKey = "";   // sprite is sized in CSS px; force a rebake
     }
     resize();
     const ro = new ResizeObserver(resize); ro.observe(cnv);
@@ -477,6 +500,24 @@ function LivingSky({
         const rows = 40;
         const baseCol = _mix(sky.lumCol, [255, 255, 255], 0.3);
         const t = ms / 1000;
+        // Every row wants the same feathered streak at a different width, alpha
+        // and offset — so bake it once at full alpha and stretch the bitmap per
+        // row, varying alpha with globalAlpha. Rebuilt only when the luminary
+        // colour shifts, which is minutes apart, not frames.
+        const glKey = `${baseCol[0] | 0},${baseCol[1] | 0},${baseCol[2] | 0}`;
+        if (glKey !== glitterKey || !glitterSprite) {
+          glitterKey = glKey;
+          const GW = 128;
+          const gc = document.createElement("canvas");
+          gc.width = GW; gc.height = 1;
+          const gg = gc.getContext("2d");
+          const lg = gg.createLinearGradient(0, 0, GW, 0);
+          lg.addColorStop(0, _rgba(baseCol, 0));
+          lg.addColorStop(0.5, _rgba(baseCol, 1));
+          lg.addColorStop(1, _rgba(baseCol, 0));
+          gg.fillStyle = lg; gg.fillRect(0, 0, GW, 1);
+          glitterSprite = gc;
+        }
         for (let i = 0; i < rows; i++) {
           const f = i / rows;
           const y = horizon + f * (H - horizon);
@@ -492,13 +533,10 @@ function LivingSky({
           const cxg = lumX + wob;
           const h = 1.5 + f * 3.5;
           // feathered horizontal streak (transparent → bright → transparent)
-          const lg = ctx.createLinearGradient(cxg - segW / 2, 0, cxg + segW / 2, 0);
-          lg.addColorStop(0, _rgba(baseCol, 0));
-          lg.addColorStop(0.5, _rgba(baseCol, _clamp(a, 0, 1)));
-          lg.addColorStop(1, _rgba(baseCol, 0));
-          ctx.fillStyle = lg;
-          ctx.fillRect(cxg - segW / 2, y, segW, h);
+          ctx.globalAlpha = _clamp(a, 0, 1);
+          ctx.drawImage(glitterSprite, cxg - segW / 2, y, segW, h);
         }
+        ctx.globalAlpha = 1;
         ctx.restore();
       }
 
@@ -516,25 +554,26 @@ function LivingSky({
       }
 
       // 8 — READABILITY SCRIM (left column + bottom strip where text lives)
-      const lscrim = ctx.createLinearGradient(0, 0, W * 0.62, 0);
-      lscrim.addColorStop(0, "rgba(0,0,0,0.34)");
-      lscrim.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = lscrim; ctx.fillRect(0, 0, W * 0.62, H);
-      const bscrim = ctx.createLinearGradient(0, H * 0.62, 0, H);
-      bscrim.addColorStop(0, "rgba(0,0,0,0)");
-      bscrim.addColorStop(1, "rgba(0,0,0,0.4)");
-      ctx.fillStyle = bscrim; ctx.fillRect(0, H * 0.62, W, H * 0.38);
-      const tscrim = ctx.createLinearGradient(0, 0, 0, 150);
-      tscrim.addColorStop(0, "rgba(0,0,0,0.28)");
-      tscrim.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = tscrim; ctx.fillRect(0, 0, W, 150);
-
-      raf = requestAnimationFrame(draw);
+      // Gradients baked in resize() — these never change between resizes.
+      ctx.fillStyle = scrimL; ctx.fillRect(0, 0, W * 0.62, H);
+      ctx.fillStyle = scrimB; ctx.fillRect(0, H * 0.62, W, H * 0.38);
+      ctx.fillStyle = scrimT; ctx.fillRect(0, 0, W, 150);
+    }
+    // draw() no longer schedules itself; loop() owns the rAF chain so it can skip
+    // frames without the throttle ever being able to stall the loop.
+    const SKY_FRAME_MS = 1000 / SKY_FPS;
+    let lastDraw = -1e9;
+    function loop(ms) {
+      raf = requestAnimationFrame(loop);
+      if (ms - lastDraw < SKY_FRAME_MS - 1) return;   // throttle to SKY_FPS
+      lastDraw = ms;
+      draw(ms);
     }
     // Paint one frame synchronously so the canvas is never blank even while the
     // tab/iframe is hidden (requestAnimationFrame is paused when not visible).
-    // The rAF chain inside draw() then animates whenever the page is visible.
+    // The rAF chain then animates whenever the page is visible.
     draw(performance.now());
+    raf = requestAnimationFrame(loop);
     const onVis = () => { if (!document.hidden) draw(performance.now()); };
     document.addEventListener("visibilitychange", onVis);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); document.removeEventListener("visibilitychange", onVis); };
