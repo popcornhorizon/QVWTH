@@ -192,7 +192,7 @@ function ViewAtmosphere({ data, now, heroLang, w, bg, sun }) {
           className="grid grid-cols-5"
           style={{ borderTop: "1px solid rgba(255,255,255,0.22)" }}
         >
-          <StatFeels i={0} scene={w.scene} value={cur.apparent_temperature} actual={cur.temperature_2m} humidity={cur.relative_humidity_2m} />
+          <StatFeels i={0} scene={w.scene} value={data.sea?.temp} actual={cur.temperature_2m} />
           <StatHumidity i={1} value={cur.relative_humidity_2m} />
           <StatWind i={2} speed={cur.wind_speed_10m} dir={cur.wind_direction_10m} />
           <StatUV i={3} value={uv} />
@@ -525,7 +525,7 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
             {w[lang]}
           </div>
           <div className="text-white/40" style={{ fontSize: 18, letterSpacing: "0.16em", marginTop: 12, fontWeight: 600 }}>
-            <RotatingLabel k="feels" offset={1} /> {round(cur.apparent_temperature)}°
+            <RotatingLabel k="feels" offset={1} /> {data.sea?.temp != null ? `${round(data.sea.temp)}°` : "--°"}
           </div>
         </div>
 
@@ -822,19 +822,20 @@ function BigNum({ value, unit, unitSize = 38 }) {
   );
 }
 
-function StatFeels({ i, value, actual, humidity }) {
-  const delta = value - actual;
-  const phrase = Math.abs(delta) < 1.2
-    ? { en: "Matches the air", ru: "Как ощущается", kz: "Ауа сияқты" }
-    : delta < 0
-      ? { en: "Wind chills it", ru: "Холоднее из-за ветра", kz: "Желден салқынырақ" }
-      : humidity > 65
-        ? { en: "Humid · feels warmer", ru: "Влажно · теплее", kz: "Ылғалды · жылырақ" }
-        : { en: "Sun adds warmth", ru: "Солнце греет", kz: "Күн жылытады" };
+function StatFeels({ i, value, actual }) {
+  // value = Caspian sea-surface temperature (api/sea.js, NOAA satellite blend).
+  const delta = value != null ? value - actual : 0;
+  const phrase = value == null
+    ? { en: "Updating\u2026", ru: "Обновление\u2026", kz: "Жаңартылуда\u2026" }
+    : Math.abs(delta) < 1.2
+      ? { en: "Same as the air", ru: "Как воздух", kz: "Ауамен бірдей" }
+      : delta < 0
+        ? { en: "Cooler than the air", ru: "Прохладнее воздуха", kz: "Ауадан салқын" }
+        : { en: "Warmer than the air", ru: "Теплее воздуха", kz: "Ауадан жылы" };
   const lang = useLang(5000, 1);
   return (
     <StatShell i={i} k="feels" offset={1}>
-      <BigNum value={round(value)} unit="°" />
+      <BigNum value={value != null ? round(value) : "--"} unit="°" />
       <div className="text-white/60" style={{ fontSize: 19, letterSpacing: "0.03em", marginTop: 16 }}>
         {phrase[lang]}
       </div>

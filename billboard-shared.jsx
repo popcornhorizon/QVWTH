@@ -7,6 +7,11 @@ const LON = 51.16;
 const FORECAST_URL = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,wind_direction_10m,pressure_msl&hourly=temperature_2m,weather_code,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,weather_code&timezone=auto&forecast_days=10`;
 const AQ_URL = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${LAT}&longitude=${LON}&current=european_aqi,pm10,pm2_5&timezone=auto`;
 const MARINE_URL = `https://marine-api.open-meteo.com/v1/marine?latitude=${LAT}&longitude=${LON}&current=wave_height,wave_direction,wave_period,sea_surface_temperature&timezone=auto`;
+// Caspian sea-surface temperature. Open-Meteo's marine model has NO Caspian
+// coverage (returns null everywhere in the basin), so this is served by our
+// own same-origin Vercel function (api/sea.js) which blends NOAA satellite
+// analyses server-side. Same origin = no new domains for the TB50 player.
+const SEA_URL = "/api/sea";
 
 const WEATHER_CACHE_KEY = "qalavision_weather_cache_v1";
 
@@ -33,13 +38,14 @@ function useWeather() {
 
     async function load() {
       try {
-        const [w, a, m] = await Promise.all([
+        const [w, a, m, s] = await Promise.all([
           fetch(FORECAST_URL).then((r) => r.json()),
           fetch(AQ_URL).then((r) => r.json()).catch(() => null),
           fetch(MARINE_URL).then((r) => r.json()).catch(() => null),
+          fetch(SEA_URL).then((r) => r.json()).catch(() => null),
         ]);
         if (cancelled) return;
-        const fresh = { ...w, air: a, marine: m, _fetchedAt: Date.now() };
+        const fresh = { ...w, air: a, marine: m, sea: s, _fetchedAt: Date.now() };
         setData(fresh);
         setError(null);
         retryDelay = 15 * 1000; // reset backoff after a success
@@ -122,7 +128,7 @@ function wmo(code) { return WMO[code] || WMO[0]; }
 // ---------- Trilingual labels ----------
 const T = {
   city:       { en: "AKTAU",          ru: "АКТАУ",          kz: "АҚТАУ" },
-  feels:      { en: "FEELS LIKE",     ru: "ОЩУЩАЕТСЯ",      kz: "СЕЗІНЕДІ" },
+  feels:      { en: "CASPIAN SEA",    ru: "КАСПИЙ",         kz: "КАСПИЙ ТЕҢІЗІ" },
   humidity:   { en: "HUMIDITY",       ru: "ВЛАЖНОСТЬ",      kz: "ЫЛҒАЛДЫЛЫҚ" },
   wind:       { en: "WIND",           ru: "ВЕТЕР",          kz: "ЖЕЛ" },
   uv:         { en: "UV INDEX",       ru: "УФ-ИНДЕКС",      kz: "УК ИНДЕКСІ" },
