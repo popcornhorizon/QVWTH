@@ -494,6 +494,24 @@ var d=null!=c&&c.hydratedSources||null,e=!1,f="",g=aj;null!==c&&void 0!==c&&(!0=
 function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmountComponentAtNode=function(a){if(!Vd(a))throw Error(m(40));return a._reactRootContainer?(yb(function(){Wd(null,null,a,!1,function(){a._reactRootContainer=null;a[Ja]=null})}),!0):!1};Q.unstable_batchedUpdates=Tf;Q.unstable_renderSubtreeIntoContainer=function(a,b,c,d){if(!Vd(c))throw Error(m(200));if(null==a||void 0===a._reactInternals)throw Error(m(38));return Wd(a,b,c,!1,d)};Q.version="18.3.1-next-f1338f8080-20240426"});
 })();
 </script>
+<script id="qv-perf-config">
+/* TB50 memory budget. The player is a 1GB Android 11 box; Android + the VNNOX
+   app leave the WebView renderer roughly 300-400MB. Three full-stage canvases
+   at 1920x1152 cost ~8.85MB of backing store EACH, plus a duplicate GPU
+   compositing texture each. That, plus the blurred halo layers, ran the
+   renderer to OOM -- which the player surfaces as its generic "no internet"
+   error page. These globals must be set BEFORE the app bundle, because
+   billboard-sky.jsx and billboard-weather-fx.jsx read QV_DPR_CAP at module
+   top level (they were previously never set at all, so DPR defaulted to 1 and
+   nothing was actually capped).
+
+   DPR 0.5 => canvases render at 960x576 and are upscaled by CSS. Nothing on
+   these canvases is text (verified: no fillText/strokeText anywhere), only
+   gradients and particles, so the wall shows no visible difference at P6
+   viewing distance -- but canvas memory drops 4x. */
+window.QV_DPR_CAP = 0.5;
+window.QV_FPS     = 30;
+</script>
 <script>/*__APP__*/</script>
 <style id="qv-resilience-css">
 #qv-badge{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483647;
@@ -539,9 +557,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       localStorage.setItem(k, String(Date.now()));
     }catch(e){}
     if(navigator.onLine){ location.reload(); return; }
-    var done = false;                           // offline: defer until link returns
+    // Offline: defer until the link returns. Guarded by a single global flag so
+    // repeated calls (the watchdog re-checks on a timer) cannot stack listeners
+    // and fire a burst of reloads the moment the network comes back.
+    if(window.__qvPendingReload) return;
+    window.__qvPendingReload = true;
     window.addEventListener("online", function go(){
-      if(done) return; done = true;
       window.removeEventListener("online", go);
       location.reload();
     });

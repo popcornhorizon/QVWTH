@@ -9,6 +9,14 @@
 //   </Screen>
 
 // ---------- Halos (always-on backdrop) ----------
+// NOTE: these two used to carry filter: blur(20px) / blur(30px). On a 1200x1200
+// and a 1400x1400 layer that is the single most expensive thing on the page --
+// a CSS blur needs source, intermediate and result buffers, so those two alone
+// cost roughly 40MB of graphics memory on a player that only has ~300-400MB for
+// the whole renderer. The blur was also close to invisible: a radial-gradient
+// with `transparent 70%` is already a soft falloff, and blurring a soft gradient
+// changes almost nothing on screen. Dropping the filter keeps the geometry and
+// the look, and hands the memory back.
 function HaloOverlay({ glow }) {
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -17,7 +25,6 @@ function HaloOverlay({ glow }) {
         style={{
           left: "8%", top: "10%", width: 1200, height: 1200,
           background: `radial-gradient(closest-side, ${glow}33, transparent 70%)`,
-          filter: "blur(20px)",
         }}
       />
       <div
@@ -25,7 +32,6 @@ function HaloOverlay({ glow }) {
         style={{
           right: "-10%", bottom: "-15%", width: 1400, height: 1400,
           background: `radial-gradient(closest-side, ${glow}22, transparent 70%)`,
-          filter: "blur(30px)",
         }}
       />
     </div>
