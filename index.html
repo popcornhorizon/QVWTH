@@ -4979,7 +4979,7 @@ createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElem
 /* Hardening layer: offline badge + white-screen watchdog + periodic refresh. */
 (function(){
   var STALE_MS     = 30*60*1000;
-  var WATCH_START  = 25000;
+  var WATCH_START  = 45000;
   var HARD_REFRESH = 6*60*60*1000;
   var badge = document.createElement("div");
   badge.id = "qv-badge";
@@ -4997,11 +4997,43 @@ createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElem
     window.addEventListener("offline", updateBadge);
   }
   if(document.body) boot(); else window.addEventListener("DOMContentLoaded", boot);
-  setTimeout(function(){
-    var root = document.getElementById("root");
-    if(!root || root.childElementCount === 0){ location.reload(); }
-  }, WATCH_START);
-  setTimeout(function(){ location.reload(); }, HARD_REFRESH);
+
+  // --- Reload safety -------------------------------------------------------
+  // A page reload is the ONLY thing that surfaces the Android WebView's native
+  // black "no internet" page: it fires when the WebView re-fetches the URL while
+  // the link is momentarily down. Service workers do NOT run in the TB50's
+  // WebView, so the page can't be served from cache on reload. The only safe
+  // rule: never reload while offline, and never reload in a tight loop.
+  function reloadWhenOnline(tag){
+    var GAP = 2*60*1000;                        // at most one reload per tag / 2 min
+    try{
+      var k = "qv_rl_" + tag, last = +localStorage.getItem(k) || 0;
+      if(Date.now() - last < GAP) return;       // throttle: kills reload loops
+      localStorage.setItem(k, String(Date.now()));
+    }catch(e){}
+    if(navigator.onLine){ location.reload(); return; }
+    var done = false;                           // offline: defer until link returns
+    window.addEventListener("online", function go(){
+      if(done) return; done = true;
+      window.removeEventListener("online", go);
+      location.reload();
+    });
+  }
+
+  // White-screen watchdog: if React never mounted, recover — but only when
+  // online, and keep re-checking rather than firing one blind reload into a
+  // dead network (which is what produced the black screen).
+  (function watch(){
+    setTimeout(function(){
+      var root = document.getElementById("root");
+      if(root && root.childElementCount > 0) return;   // mounted — nothing to do
+      reloadWhenOnline("watch");                        // blank — recover safely
+      watch();                                          // and keep watching
+    }, WATCH_START);
+  })();
+
+  // Periodic freshness reload — skipped/deferred whenever the player is offline.
+  setInterval(function(){ reloadWhenOnline("hard"); }, HARD_REFRESH);
 })();
 </script>
 </body>
