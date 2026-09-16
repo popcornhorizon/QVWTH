@@ -24,14 +24,16 @@ live data on load and refreshes every 10 minutes.
 
 ## Files in this package
 
+The four `../billboard-*.jsx` sources are shared with the root package — this folder holds only its own entry point and mount.
+
 | File | Role |
 |---|---|
 | `Atmosphere Weather.html` | Entry point. Loads CDN libs, holds the CSS keyframes, mounts the app. |
 | `mount.jsx` | Mounts `VariantAtmosphere` full-screen in a 1920×1080 stage that auto-scales to any viewport (letterboxed). Live mode, no tweaks/canvas. |
-| `billboard-shared.jsx` | Data layer: Open-Meteo fetch hook, WMO code lookup, trilingual (EN/RU/KZ) strings, formatting helpers, particle engine, logo, palettes. |
-| `billboard-sky.jsx` | `LivingSky` — day→night gradient sky, stars, sun/moon disc (procedural lunar surface), parallax clouds, god-rays. |
-| `billboard-weather-fx.jsx` | `WeatherFX` — depth-layered rain / snow / fog / lightning / dust overlay. |
-| `billboard-atmosphere.jsx` | `VariantAtmosphere` — the three rotating views + stat columns. |
+| `../billboard-shared.jsx` | Data layer: Open-Meteo fetch hook, WMO code lookup, trilingual (EN/RU/KZ) strings, formatting helpers, particle engine, logo, palettes. |
+| `../billboard-sky.jsx` | `LivingSky` — day→night gradient sky, stars, sun/moon disc (procedural lunar surface), parallax clouds, god-rays. |
+| `../billboard-weather-fx.jsx` | `WeatherFX` — depth-layered rain / snow / fog / lightning / dust overlay. |
+| `../billboard-atmosphere.jsx` | `VariantAtmosphere` — the three rotating views + stat columns. |
 
 Script load order in the HTML matters: `shared → sky → weather-fx → atmosphere → mount`.
 
