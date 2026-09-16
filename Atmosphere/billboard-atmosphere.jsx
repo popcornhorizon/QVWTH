@@ -469,14 +469,13 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
   const dayMin = Math.max(0, Math.round((ss - sr) / 60000));
   const dlH = Math.floor(dayMin / 60), dlM = dayMin % 60;
   const goldenStr = hhmm(ss - 3600000);
-  const nextSrStr = hhmm(new Date(daily.sunrise[1] || srISO).getTime());
 
   // bottom ribbon (3 figures)
   const ribbon = [
     { k: "daylight", val: `${dlH}H ${pad2(dlM)}M` },
     { k: isDay ? "high" : "low", val: `${round(isDay ? daily.temperature_2m_max[0] : daily.temperature_2m_min[0])}°`,
       k2: isDay ? "low" : "high", val2: `${round(isDay ? daily.temperature_2m_min[0] : daily.temperature_2m_max[0])}°` },
-    isDay ? { k: "goldenHour", val: goldenStr } : { k: "sunrise", val: nextSrStr },
+    isDay ? { k: "goldenHour", val: goldenStr } : { k: "humidity", val: `${round(cur.relative_humidity_2m)}%` },
   ];
 
   return (
