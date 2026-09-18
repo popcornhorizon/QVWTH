@@ -1,6 +1,7 @@
 {
   "routes": [
     { "src": "/", "dest": "/Atmosphere/Atmosphere%20Weather.html" },
+    { "src": "/mount.jsx", "dest": "/Atmosphere/mount.jsx" },
     { "handle": "filesystem" }
   ]
 }
