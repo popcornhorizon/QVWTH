@@ -1,5 +1,6 @@
 {
-  "rewrites": [
-    { "source": "/", "destination": "/Atmosphere/Atmosphere%20Weather.html" }
+  "routes": [
+    { "src": "/", "dest": "/Atmosphere/Atmosphere%20Weather.html" },
+    { "handle": "filesystem" }
   ]
 }
