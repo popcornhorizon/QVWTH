@@ -95,7 +95,7 @@ function skyFromT(t) {
   const moonY = horizonY - moonAlt * (horizonY - 0.1);
 
   const sunCol = _mix([255, 240, 196], [255, 116, 52], warmth);
-  const moonCol = [228, 232, 244];
+  const moonCol = [238, 233, 220];  // warm ivory-grey — how a real full moon reads, not blue-white
 
   return {
     alt, light, warmth, stars, horizonY,
@@ -104,7 +104,7 @@ function skyFromT(t) {
     lumY: isMoon ? moonY : sunY,
     lumVisible: (isMoon ? moonY : sunY) < horizonY - 0.01,
     lumCol: isMoon ? moonCol : sunCol,
-    lumR: isMoon ? 0.032 : 0.05,
+    lumR: isMoon ? 0.05 : 0.05,
     isMoon,
     rayStrength: _clamp(light * (1 - warmth * 0.3), 0, 1) * (alt > 0.02 ? 1 : 0),
   };
@@ -139,6 +139,127 @@ function sceneCloudiness(scene) {
   if (scene === "wind") return 0.34;
   if (scene === "heat") return 0.05;
   return 0.14; // clear
+}
+
+// ---------- value-noise + RNG (for the procedural Moon texture) ----------
+function _mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function _makeValueNoise(seed) {
+  const off = (seed * 1013) | 0;
+  const hash = (x, y) => {
+    let h = (Math.imul((x + off) | 0, 374761393) + Math.imul((y - off) | 0, 668265263)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  };
+  const noise = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const u = _smooth(xf), v = _smooth(yf);
+    const v00 = hash(xi, yi), v10 = hash(xi + 1, yi), v01 = hash(xi, yi + 1), v11 = hash(xi + 1, yi + 1);
+    return (v00 * (1 - u) + v10 * u) * (1 - v) + (v01 * (1 - u) + v11 * u) * v;
+  };
+  return (x, y) => {
+    let a = 0, amp = 0.5, f = 1;
+    for (let o = 0; o < 5; o++) { a += amp * noise(x * f, y * f); f *= 2; amp *= 0.5; }
+    return a;
+  };
+}
+
+// ---------- procedural Moon texture ----------
+// Bakes ONE photoreal-ish lunar disc: the real near-side maria laid out where
+// they actually sit, fractal-noise highland mottling, ~90 craters lit from the
+// upper-left, and the Tycho/Copernicus ray systems. Baked once, then drawn
+// limb-lit and phase-shadowed at runtime.
+function _buildMoonSprite() {
+  const D = 512, R = D / 2;
+  const cv = document.createElement("canvas"); cv.width = D; cv.height = D;
+  const c = cv.getContext("2d");
+  const img = c.createImageData(D, D);
+  const fbm = _makeValueNoise(41), fine = _makeValueNoise(97);
+  const highland = [232, 228, 214];
+  // Near-side maria: [x, y, ax, ay, strength]  (x→right, y→down, disc radius = 1)
+  const maria = [
+    [-0.30, -0.34, 0.34, 0.30, 1.00], // Imbrium
+    [0.10, -0.30, 0.22, 0.21, 0.96],  // Serenitatis
+    [0.34, -0.10, 0.21, 0.21, 0.95],  // Tranquillitatis
+    [0.48, 0.14, 0.16, 0.18, 0.90],   // Fecunditatis
+    [0.30, 0.26, 0.14, 0.14, 0.85],   // Nectaris
+    [-0.22, 0.30, 0.23, 0.19, 0.82],  // Nubium / Cognitum
+    [-0.52, -0.02, 0.21, 0.36, 0.95], // Oceanus Procellarum (elongated)
+    [0.58, -0.26, 0.10, 0.12, 1.00],  // Crisium (distinct oval)
+  ];
+  for (let y = 0; y < D; y++) {
+    for (let x = 0; x < D; x++) {
+      const nx = (x - R) / R, ny = (y - R) / R, rr = nx * nx + ny * ny;
+      const idx = (y * D + x) * 4;
+      if (rr > 1) { img.data[idx + 3] = 0; continue; }
+      const nz = Math.sqrt(1 - rr);
+      let alb = 0.90 + (fbm(nx * 2.2 + 1, ny * 2.2 + 1) - 0.5) * 0.16;
+      let m = 0;
+      for (const mr of maria) {
+        let dx = (nx - mr[0]) / mr[2], dy = (ny - mr[1]) / mr[3];
+        let d = Math.sqrt(dx * dx + dy * dy);
+        d += (fbm(nx * 3 + mr[0] * 5, ny * 3 + mr[1] * 5) - 0.5) * 0.5; // irregular coastline
+        const inf = _smooth(_clamp((1.0 - d) / 0.5, 0, 1)) * mr[4];
+        if (inf > m) m = inf;
+      }
+      alb = alb * (1 - m) + (0.55 + (fine(nx * 6, ny * 6) - 0.5) * 0.07) * m;
+      const limb = 0.74 + 0.26 * Math.pow(nz, 0.45); // Moon is near flat-lit; slight edge fall-off
+      const v = alb * limb;
+      let r = highland[0] * v, g = highland[1] * v, b = highland[2] * v;
+      r *= 1 - 0.12 * m; g *= 1 - 0.05 * m;                  // maria a touch cooler
+      const edge = _clamp((1 - Math.sqrt(rr)) / 0.012, 0, 1); // AA the limb
+      img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = b;
+      img.data[idx + 3] = 255 * edge;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  // Craters — vector, lit from upper-left (bright NW rim, shadowed SE rim).
+  const rnd = _mulberry32(12345);
+  const crater = (cx, cy, cr, depth) => {
+    if (Math.sqrt(cx * cx + cy * cy) > 0.95) return;
+    const px = R + cx * R, py = R + cy * R, pr = cr * R;
+    c.save();
+    c.beginPath(); c.arc(px, py, pr, 0, 6.283);
+    c.fillStyle = `rgba(64,62,58,${0.09 * depth})`; c.fill();        // floor
+    c.lineWidth = Math.max(1, pr * 0.20);
+    c.strokeStyle = `rgba(255,250,236,${0.20 * depth})`;            // sunlit rim (NW)
+    c.beginPath(); c.arc(px, py, pr * 0.92, Math.PI * 0.92, Math.PI * 1.92); c.stroke();
+    c.strokeStyle = `rgba(38,36,32,${0.20 * depth})`;              // shadow rim (SE)
+    c.beginPath(); c.arc(px, py, pr * 0.92, Math.PI * -0.08, Math.PI * 0.92); c.stroke();
+    c.restore();
+  };
+  for (let i = 0; i < 90; i++) {
+    const a = rnd() * 6.283, rad = Math.sqrt(rnd()) * 0.93;
+    crater(Math.cos(a) * rad, Math.sin(a) * rad, 0.012 + rnd() * 0.038, 0.6 + rnd() * 0.6);
+  }
+  const rays = (cx, cy, len, n) => {
+    const px = R + cx * R, py = R + cy * R;
+    c.save(); c.globalCompositeOperation = "lighter";
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * 6.283, ex = px + Math.cos(a) * len * R, ey = py + Math.sin(a) * len * R;
+      const g = c.createLinearGradient(px, py, ex, ey);
+      g.addColorStop(0, "rgba(255,250,238,0)");
+      g.addColorStop(0.35, "rgba(255,250,238,0.07)");
+      g.addColorStop(1, "rgba(255,250,238,0)");
+      c.strokeStyle = g; c.lineWidth = R * 0.011;
+      c.beginPath(); c.moveTo(px, py); c.lineTo(ex, ey); c.stroke();
+    }
+    c.restore();
+  };
+  rays(-0.05, 0.55, 0.62, 16); crater(-0.05, 0.55, 0.05, 1.5);   // Tycho
+  rays(-0.22, -0.02, 0.42, 12); crater(-0.22, -0.02, 0.05, 1.3); // Copernicus
+  crater(-0.42, 0.32, 0.045, 1.1);
+  // Re-clip everything to the disc (rays/strokes can spill past the limb).
+  c.save(); c.globalCompositeOperation = "destination-in";
+  c.beginPath(); c.arc(R, R, R, 0, 6.283); c.fillStyle = "#fff"; c.fill(); c.restore();
+  return { canvas: cv, size: D };
 }
 
 // Deterministic cloud field: bands of soft puff-clusters with flat bottoms
@@ -176,13 +297,6 @@ function buildClouds() {
   return layers;
 }
 
-// Frame cap and pixel-density cap for the sky canvas. The TB50 gains nothing
-// from 60fps on a scene that changes over minutes, and nothing from rendering
-// above 1 device pixel per CSS pixel — both just burn fill rate the player does
-// not have. Override with window.QV_FPS / window.QV_DPR_CAP before this loads.
-const SKY_FPS = window.QV_FPS || 30;
-const SKY_DPR_CAP = window.QV_DPR_CAP || 1;
-
 function LivingSky({
   scene = "clear", isDay = true, sunProgress = 0.5,
   sunriseISO, sunsetISO, now, tempC = 20,
@@ -191,6 +305,7 @@ function LivingSky({
 }) {
   const ref = React.useRef(null);
   const clouds = React.useMemo(buildClouds, []);
+  const moonSprite = React.useMemo(_buildMoonSprite, []);
   // Mutable state shared with the rAF loop (so prop changes don't restart it).
   const S = React.useRef({
     cur: null, phase: 0.3, tPrev: 0,
@@ -202,28 +317,12 @@ function LivingSky({
     const cnv = ref.current; if (!cnv) return;
     const ctx = cnv.getContext("2d");
     let raf, W = 0, H = 0, dpr = 1;
-    // Baked once per resize rather than rebuilt every frame (see draw()).
-    let scrimL = null, scrimB = null, scrimT = null;
-    let glitterSprite = null, glitterKey = "";
 
     function resize() {
-      dpr = Math.min(SKY_DPR_CAP, window.devicePixelRatio || 1);
+      dpr = Math.min(1.6, window.devicePixelRatio || 1);
       W = cnv.offsetWidth; H = cnv.offsetHeight;
       cnv.width = W * dpr; cnv.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      // The readability scrims are fixed geometry in fixed colours — they only
-      // depend on W/H, so there is no reason to re-create them 30 times a second.
-      scrimL = ctx.createLinearGradient(0, 0, W * 0.62, 0);
-      scrimL.addColorStop(0, "rgba(0,0,0,0.34)");
-      scrimL.addColorStop(1, "rgba(0,0,0,0)");
-      scrimB = ctx.createLinearGradient(0, H * 0.62, 0, H);
-      scrimB.addColorStop(0, "rgba(0,0,0,0)");
-      scrimB.addColorStop(1, "rgba(0,0,0,0.4)");
-      scrimT = ctx.createLinearGradient(0, 0, 0, 150);
-      scrimT.addColorStop(0, "rgba(0,0,0,0.28)");
-      scrimT.addColorStop(1, "rgba(0,0,0,0)");
-      glitterKey = "";   // sprite is sized in CSS px; force a rebake
     }
     resize();
     const ro = new ResizeObserver(resize); ro.observe(cnv);
@@ -402,18 +501,26 @@ function LivingSky({
         ctx.restore();
         // disc (also fades out under heavy cloud)
         const disc = ctx.createRadialGradient(lumX, lumY, 0, lumX, lumY, lumR);
-        disc.addColorStop(0, _rgba(_mix(sky.lumCol, [255, 255, 255], 0.6), lumDim));
-        disc.addColorStop(1, _rgba(sky.lumCol, 0.9 * lumDim));
+        disc.addColorStop(0, _rgba(_mix(sky.lumCol, [255, 252, 244], 0.45), lumDim));
+        disc.addColorStop(0.82, _rgba(sky.lumCol, lumDim));
+        disc.addColorStop(1, _rgba(_mix(sky.lumCol, [120, 112, 96], 0.28), 0.92 * lumDim));  // faint limb darkening
         ctx.fillStyle = disc;
         ctx.beginPath(); ctx.arc(lumX, lumY, lumR, 0, 6.283); ctx.fill();
         if (sky.isMoon) {
-          // maria: soft grey patches across the full disc (the shadow will mask
-          // whatever falls on the unlit side, so they only show where it's lit)
-          ctx.fillStyle = _rgba([176, 184, 206], 0.40);
-          ctx.beginPath(); ctx.arc(lumX + lumR * 0.30, lumY - lumR * 0.20, lumR * 0.24, 0, 6.283); ctx.fill();
-          ctx.beginPath(); ctx.arc(lumX - lumR * 0.22, lumY + lumR * 0.28, lumR * 0.16, 0, 6.283); ctx.fill();
-          ctx.fillStyle = _rgba([176, 184, 206], 0.28);
-          ctx.beginPath(); ctx.arc(lumX + lumR * 0.04, lumY + lumR * 0.05, lumR * 0.12, 0, 6.283); ctx.fill();
+          // Actual lunar surface: a baked photoreal texture (real maria layout,
+          // craters, Tycho rays), drawn at the disc size and tinted to the night's
+          // moon colour. Limb darkening + edge AA are baked into the sprite.
+          const sp = moonSprite;
+          ctx.save();
+          ctx.globalAlpha = lumDim;
+          ctx.beginPath(); ctx.arc(lumX, lumY, lumR, 0, 6.283); ctx.clip();
+          ctx.drawImage(sp.canvas, lumX - lumR, lumY - lumR, lumR * 2, lumR * 2);
+          // gentle tint pull toward tonight's moon colour (multiply keeps texture)
+          ctx.globalCompositeOperation = "multiply";
+          ctx.globalAlpha = lumDim * 0.5;
+          ctx.fillStyle = _rgba(_mix([255, 255, 255], sky.lumCol, 0.7), 1);
+          ctx.fillRect(lumX - lumR, lumY - lumR, lumR * 2, lumR * 2);
+          ctx.restore();
           // real phase: carve the unlit portion with a soft terminator + earthshine
           _drawMoonShadow(ctx, lumX, lumY, lumR, moonPhaseVal, [54, 62, 92]);
         }
@@ -500,24 +607,6 @@ function LivingSky({
         const rows = 40;
         const baseCol = _mix(sky.lumCol, [255, 255, 255], 0.3);
         const t = ms / 1000;
-        // Every row wants the same feathered streak at a different width, alpha
-        // and offset — so bake it once at full alpha and stretch the bitmap per
-        // row, varying alpha with globalAlpha. Rebuilt only when the luminary
-        // colour shifts, which is minutes apart, not frames.
-        const glKey = `${baseCol[0] | 0},${baseCol[1] | 0},${baseCol[2] | 0}`;
-        if (glKey !== glitterKey || !glitterSprite) {
-          glitterKey = glKey;
-          const GW = 128;
-          const gc = document.createElement("canvas");
-          gc.width = GW; gc.height = 1;
-          const gg = gc.getContext("2d");
-          const lg = gg.createLinearGradient(0, 0, GW, 0);
-          lg.addColorStop(0, _rgba(baseCol, 0));
-          lg.addColorStop(0.5, _rgba(baseCol, 1));
-          lg.addColorStop(1, _rgba(baseCol, 0));
-          gg.fillStyle = lg; gg.fillRect(0, 0, GW, 1);
-          glitterSprite = gc;
-        }
         for (let i = 0; i < rows; i++) {
           const f = i / rows;
           const y = horizon + f * (H - horizon);
@@ -533,10 +622,13 @@ function LivingSky({
           const cxg = lumX + wob;
           const h = 1.5 + f * 3.5;
           // feathered horizontal streak (transparent → bright → transparent)
-          ctx.globalAlpha = _clamp(a, 0, 1);
-          ctx.drawImage(glitterSprite, cxg - segW / 2, y, segW, h);
+          const lg = ctx.createLinearGradient(cxg - segW / 2, 0, cxg + segW / 2, 0);
+          lg.addColorStop(0, _rgba(baseCol, 0));
+          lg.addColorStop(0.5, _rgba(baseCol, _clamp(a, 0, 1)));
+          lg.addColorStop(1, _rgba(baseCol, 0));
+          ctx.fillStyle = lg;
+          ctx.fillRect(cxg - segW / 2, y, segW, h);
         }
-        ctx.globalAlpha = 1;
         ctx.restore();
       }
 
@@ -554,26 +646,25 @@ function LivingSky({
       }
 
       // 8 — READABILITY SCRIM (left column + bottom strip where text lives)
-      // Gradients baked in resize() — these never change between resizes.
-      ctx.fillStyle = scrimL; ctx.fillRect(0, 0, W * 0.62, H);
-      ctx.fillStyle = scrimB; ctx.fillRect(0, H * 0.62, W, H * 0.38);
-      ctx.fillStyle = scrimT; ctx.fillRect(0, 0, W, 150);
-    }
-    // draw() no longer schedules itself; loop() owns the rAF chain so it can skip
-    // frames without the throttle ever being able to stall the loop.
-    const SKY_FRAME_MS = 1000 / SKY_FPS;
-    let lastDraw = -1e9;
-    function loop(ms) {
-      raf = requestAnimationFrame(loop);
-      if (ms - lastDraw < SKY_FRAME_MS - 1) return;   // throttle to SKY_FPS
-      lastDraw = ms;
-      draw(ms);
+      const lscrim = ctx.createLinearGradient(0, 0, W * 0.62, 0);
+      lscrim.addColorStop(0, "rgba(0,0,0,0.34)");
+      lscrim.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = lscrim; ctx.fillRect(0, 0, W * 0.62, H);
+      const bscrim = ctx.createLinearGradient(0, H * 0.62, 0, H);
+      bscrim.addColorStop(0, "rgba(0,0,0,0)");
+      bscrim.addColorStop(1, "rgba(0,0,0,0.4)");
+      ctx.fillStyle = bscrim; ctx.fillRect(0, H * 0.62, W, H * 0.38);
+      const tscrim = ctx.createLinearGradient(0, 0, 0, 150);
+      tscrim.addColorStop(0, "rgba(0,0,0,0.28)");
+      tscrim.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = tscrim; ctx.fillRect(0, 0, W, 150);
+
+      raf = requestAnimationFrame(draw);
     }
     // Paint one frame synchronously so the canvas is never blank even while the
     // tab/iframe is hidden (requestAnimationFrame is paused when not visible).
-    // The rAF chain then animates whenever the page is visible.
+    // The rAF chain inside draw() then animates whenever the page is visible.
     draw(performance.now());
-    raf = requestAnimationFrame(loop);
     const onVis = () => { if (!document.hidden) draw(performance.now()); };
     document.addEventListener("visibilitychange", onVis);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); document.removeEventListener("visibilitychange", onVis); };

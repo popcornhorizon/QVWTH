@@ -9,14 +9,6 @@
 //   </Screen>
 
 // ---------- Halos (always-on backdrop) ----------
-// NOTE: these two used to carry filter: blur(20px) / blur(30px). On a 1200x1200
-// and a 1400x1400 layer that is the single most expensive thing on the page --
-// a CSS blur needs source, intermediate and result buffers, so those two alone
-// cost roughly 40MB of graphics memory on a player that only has ~300-400MB for
-// the whole renderer. The blur was also close to invisible: a radial-gradient
-// with `transparent 70%` is already a soft falloff, and blurring a soft gradient
-// changes almost nothing on screen. Dropping the filter keeps the geometry and
-// the look, and hands the memory back.
 function HaloOverlay({ glow }) {
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -25,6 +17,7 @@ function HaloOverlay({ glow }) {
         style={{
           left: "8%", top: "10%", width: 1200, height: 1200,
           background: `radial-gradient(closest-side, ${glow}33, transparent 70%)`,
+          filter: "blur(20px)",
         }}
       />
       <div
@@ -32,6 +25,7 @@ function HaloOverlay({ glow }) {
         style={{
           right: "-10%", bottom: "-15%", width: 1400, height: 1400,
           background: `radial-gradient(closest-side, ${glow}22, transparent 70%)`,
+          filter: "blur(30px)",
         }}
       />
     </div>
@@ -198,7 +192,7 @@ function ViewAtmosphere({ data, now, heroLang, w, bg, sun }) {
           className="grid grid-cols-5"
           style={{ borderTop: "1px solid rgba(255,255,255,0.22)" }}
         >
-          <StatFeels i={0} scene={w.scene} value={data.sea?.temp} actual={cur.temperature_2m} />
+          <StatFeels i={0} scene={w.scene} value={cur.apparent_temperature} actual={cur.temperature_2m} humidity={cur.relative_humidity_2m} />
           <StatHumidity i={1} value={cur.relative_humidity_2m} />
           <StatWind i={2} speed={cur.wind_speed_10m} dir={cur.wind_direction_10m} />
           <StatUV i={3} value={uv} />
@@ -286,7 +280,7 @@ const _rgbaA  = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const _clampA = (v, a, b) => (v < a ? a : v > b ? b : v);
 const _easeA  = (t) => 1 - Math.pow(1 - t, 3);
 
-// Shared arc geometry — resolution-independent, expressed as fractions of the stage
+// Shared arc geometry (canvas px ≈ 2623×1080 view box)
 function _arcGeom(W, H) {
   const x0 = W * 0.155, x1 = W * 0.845;
   const horizonY = H * 0.685;
@@ -296,21 +290,6 @@ function _arcGeom(W, H) {
 function _arcPos(p, W, H) {
   const { x0, x1, horizonY, arcH } = _arcGeom(W, H);
   return [x0 + (x1 - x0) * p, horizonY - arcH * Math.sin(Math.PI * p)];
-}
-
-// Keeps the DOM overlay locked to the same stage box the canvas draws into,
-// so the arc markers stay on the arc at any stage size.
-function useStageSize(ref) {
-  const [size, setSize] = useState({ W: 1920, H: 1152 });
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const measure = () => setSize({ W: el.offsetWidth, H: el.offsetHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return size;
 }
 
 function drawTodayArc(ctx, W, H, p, isDay, accentHex, ms, introT) {
@@ -428,26 +407,18 @@ function TodayArc({ p, isDay, accent, active }) {
   useEffect(() => {
     const cnv = ref.current; if (!cnv) return;
     const ctx = cnv.getContext("2d");
-    // The stage is authored at the wall's native 1920x1152 and maps 1:1 to the
-    // LEDs, so a buffer above 1 device pixel per CSS pixel is resampled straight
-    // back down — cost with no visible gain on the player.
-    let raf, dpr = Math.min(window.QV_DPR_CAP || 1, window.devicePixelRatio || 1);
+    let raf, dpr = Math.min(2, window.devicePixelRatio || 1);
     function size() {
       const w = cnv.offsetWidth, h = cnv.offsetHeight;
       cnv.width = w * dpr; cnv.height = h * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     size();
-    const ARC_FRAME_MS = 1000 / (window.QV_FPS || 30);
-    let lastDraw = -1e9;
     function frame() {
-      // Scheduled first so an early return can never break the chain.
-      raf = requestAnimationFrame(frame);
       const ms = performance.now();
-      if (ms - lastDraw < ARC_FRAME_MS - 1) return;   // throttle to QV_FPS
-      lastDraw = ms;
       const introT = _easeA(_clampA((ms - startRef.current) / 1300, 0, 1));
       drawTodayArc(ctx, cnv.offsetWidth, cnv.offsetHeight, pRef.current, dayRef.current, accRef.current, ms, introT);
+      raf = requestAnimationFrame(frame);
     }
     frame();
     const onR = () => size();
@@ -459,7 +430,6 @@ function TodayArc({ p, isDay, accent, active }) {
 }
 
 function ViewToday({ data, now, heroLang, w, bg, active }) {
-  const stageRef = useRef(null);
   const cur = data.current;
   const daily = data.daily;
   const isDay = !!cur.is_day;
@@ -488,24 +458,27 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
   }
 
   const accent = isDay ? "#ffce6e" : "#bcd2ff";
-  const { W, H } = useStageSize(stageRef);
+  const W = 2623, H = 1080;
   const [bx, by] = _arcPos(p, W, H);
   const { x0, x1, horizonY } = _arcGeom(W, H);
 
   const dayMin = Math.max(0, Math.round((ss - sr) / 60000));
   const dlH = Math.floor(dayMin / 60), dlM = dayMin % 60;
   const goldenStr = hhmm(ss - 3600000);
+  const nextSrStr = hhmm(new Date(daily.sunrise[1] || srISO).getTime());
 
   // bottom ribbon (3 figures)
   const ribbon = [
     { k: "daylight", val: `${dlH}H ${pad2(dlM)}M` },
     { k: isDay ? "high" : "low", val: `${round(isDay ? daily.temperature_2m_max[0] : daily.temperature_2m_min[0])}°`,
       k2: isDay ? "low" : "high", val2: `${round(isDay ? daily.temperature_2m_min[0] : daily.temperature_2m_max[0])}°` },
-    isDay ? { k: "goldenHour", val: goldenStr } : { k: "humidity", val: `${round(cur.relative_humidity_2m)}%` },
-  ];
+    // By night the sunrise is already shown on the right horizon anchor, so
+    // repeating it here would duplicate the same figure.
+    isDay ? { k: "goldenHour", val: goldenStr } : null,
+  ].filter(Boolean);
 
   return (
-    <div ref={stageRef} className="absolute inset-0" style={{ overflow: "hidden" }}>
+    <div className="absolute inset-0" style={{ overflow: "hidden" }}>
       <TodayArc p={p} isDay={isDay} accent={accent} active={active} />
 
       {/* OVERLAYS — non-interactive, crisp text on top of the canvas glow */}
@@ -531,25 +504,16 @@ function ViewToday({ data, now, heroLang, w, bg, active }) {
             {w[lang]}
           </div>
           <div className="text-white/40" style={{ fontSize: 18, letterSpacing: "0.16em", marginTop: 12, fontWeight: 600 }}>
-            <RotatingLabel k="feels" offset={1} /> {data.sea?.temp != null ? `${round(data.sea.temp)}°` : "--°"}
+            <RotatingLabel k="feels" offset={1} /> {round(cur.apparent_temperature)}°
           </div>
         </div>
 
-        {/* NOW bead tag */}
+        {/* NOW bead tick */}
         <div className="absolute" style={{
-          left: bx, top: by - 96, transform: "translate(-50%, 0)",
+          left: bx, top: by - 40, transform: "translate(-50%, 0)",
           animation: "nowFloat 4s ease-in-out infinite",
         }}>
-          <div className="flex flex-col items-center" style={{ gap: 6 }}>
-            <span style={{
-              fontSize: 14, letterSpacing: "0.34em", fontWeight: 700,
-              color: accent,
-            }}>
-              <RotatingLabel k="nowLbl" offset={0} />
-            </span>
-            <span className="tabular-nums" style={{ fontSize: 28, fontWeight: 500, color: "#fff" }}>
-              {fmtClock(now)}
-            </span>
+          <div className="flex flex-col items-center">
             <span style={{ width: 1, height: 26, background: `linear-gradient(${accent}, transparent)` }} />
           </div>
         </div>
@@ -710,13 +674,9 @@ function VariantAtmosphere({ flythrough = false, flySpeed = 1, previewWeather = 
           </span>
         </div>
 
-        {/* RIGHT — live status + clock */}
+        {/* RIGHT — live status + date */}
         <div className="flex items-center justify-end gap-6">
           <LivePill offset={2} />
-          <span style={{ fontSize: 34, letterSpacing: "0.04em", fontWeight: 500 }} className="text-white/95 tabular-nums">
-            {fmtClock(now)}
-          </span>
-          <span className="text-white/25" style={{ fontSize: 18 }}>·</span>
           <span className="text-white/65" style={{ fontSize: 21, letterSpacing: "0.24em", fontWeight: 500 }}>
             {fmtDate(now, heroLang)}
           </span>
@@ -828,20 +788,19 @@ function BigNum({ value, unit, unitSize = 38 }) {
   );
 }
 
-function StatFeels({ i, value, actual }) {
-  // value = Caspian sea-surface temperature (api/sea.js, NOAA satellite blend).
-  const delta = value != null ? value - actual : 0;
-  const phrase = value == null
-    ? { en: "Updating\u2026", ru: "Обновление\u2026", kz: "Жаңартылуда\u2026" }
-    : Math.abs(delta) < 1.2
-      ? { en: "Same as the air", ru: "Как воздух", kz: "Ауамен бірдей" }
-      : delta < 0
-        ? { en: "Cooler than the air", ru: "Прохладнее воздуха", kz: "Ауадан салқын" }
-        : { en: "Warmer than the air", ru: "Теплее воздуха", kz: "Ауадан жылы" };
+function StatFeels({ i, value, actual, humidity }) {
+  const delta = value - actual;
+  const phrase = Math.abs(delta) < 1.2
+    ? { en: "Matches the air", ru: "Как ощущается", kz: "Ауа сияқты" }
+    : delta < 0
+      ? { en: "Wind chills it", ru: "Холоднее из-за ветра", kz: "Желден салқынырақ" }
+      : humidity > 65
+        ? { en: "Humid · feels warmer", ru: "Влажно · теплее", kz: "Ылғалды · жылырақ" }
+        : { en: "Sun adds warmth", ru: "Солнце греет", kz: "Күн жылытады" };
   const lang = useLang(5000, 1);
   return (
     <StatShell i={i} k="feels" offset={1}>
-      <BigNum value={value != null ? round(value) : "--"} unit="°" />
+      <BigNum value={round(value)} unit="°" />
       <div className="text-white/60" style={{ fontSize: 19, letterSpacing: "0.03em", marginTop: 16 }}>
         {phrase[lang]}
       </div>
